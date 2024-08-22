@@ -3,9 +3,10 @@ import pandas as pd
 import mysql.connector
 from sqlalchemy  import create_engine
 
-
+#connect to sql
 db_url = 'mysql+mysqlconnector://root:@localhost/redbus'
 
+#Load data from sql to streamlit
 engine = create_engine(db_url)
 def load_data():
     
@@ -20,19 +21,24 @@ st.image('C:/Users/ADMIN/Downloads/redbus.jpg')
 st.title("RedBus Data Viewer")
 st.sidebar.header("Filter Options")
 # Filters
-#1.route
+# 1. Bus Name Filter
+busname = st.sidebar.multiselect(
+    'Select Bus Name',
+    options=df['busname'].unique()
+)
+#2.route
 route = st.sidebar.multiselect(
     'Select Route',
     options=df['route_name'].unique()
 )
 
-#2.bustype
+#3.bustype
 bustype = st.sidebar.multiselect(
     'Select Bus Type',
     options=df['bustype'].unique()
 )
 
-#3.price range 
+#4.price range 
 price_min = float(df['price'].min())
 price_max = float(df['price'].max())
 price_range = st.sidebar.slider(
@@ -42,7 +48,7 @@ price_range = st.sidebar.slider(
     value=(price_max,price_min)
 )
 
-#4.star rating
+#5.star rating
 star_max = float(df['star_rating'].max())
 star_min = float(df['star_rating'].min())
 star_rating = st.sidebar.slider(
@@ -52,34 +58,93 @@ star_rating = st.sidebar.slider(
     value=(star_max,star_min)
 )
 
-#5.Availability
+#6.Availability
 availability = st.sidebar.selectbox(
     'Seats Availability',
     options=('All','Available Only')
 )
 
-#Apply filters
+# 7. Departure Time Filter
+departure_time_start = st.sidebar.time_input('Select Departure Time Start', value=pd.to_datetime('00:00').time())
+departure_time_end = st.sidebar.time_input('Select Departure Time End', value=pd.to_datetime('23:59').time())
 
-filter_df = df[
-    (df['bustype'].isin(bustype)) &
-    (df['route_name'].isin(route)) &
-    (df['price'] >= price_range[0]) &
-    (df['price'] <= price_range[1]) &
-    (df['star_rating'] >= star_rating[0]) &
-    (df['star_rating'] <= star_rating[1])
-]
+# Function to convert a list to a format suitable for SQL IN clause
+def format_for_sql_in(values):
+    return ', '.join(f"'{value}'" for value in values)
+
+# Construct the SQL query with filters
+query = "SELECT * FROM redbus.busdata WHERE 1=1"  
+
+# Add filters only if they are not empty
+if bustype:
+    query += f" AND bustype IN ({format_for_sql_in(bustype)})"
+if route:
+    query += f" AND route_name IN ({format_for_sql_in(route)})"
+query += f" AND price BETWEEN {price_range[0]} AND {price_range[1]}"
+query += f" AND star_rating BETWEEN {star_rating[0]} AND {star_rating[1]}"
+if busname:
+    query += f" AND busname IN ({format_for_sql_in(busname)})"
+query += f" AND departing_time BETWEEN '{departure_time_start}' AND '{departure_time_end}'"
 
 if availability == 'Available Only':
-    filter_df = filter_df[filter_df['seats_available'] > 0]
+    query += " AND seats_available > 0"
 
+# Execute the query
+filter_df = pd.read_sql(query, engine)
+
+# Display filtered data
 st.dataframe(filter_df)
-
-#analysis
 
 st.header('Data Analysis')
 
-avg_price_per_busroute = filter_df.groupby('route_name')['price'].mean()
-st.bar_chart(avg_price_per_busroute)
+st.subheader("Route Vs Price")
+#Data analysis=1
+avg_price_query = "SELECT route_name, AVG(price) AS avg_price FROM redbus.busdata WHERE 1=1"
 
-avg_rating_per_bustype = filter_df.groupby('bustype')['star_rating'].mean()
-st.bar_chart(avg_rating_per_bustype)
+# Add filters only if they are not empty
+if bustype:
+    query += f" AND bustype IN ({format_for_sql_in(bustype)})"
+if route:
+    query += f" AND route_name IN ({format_for_sql_in(route)})"
+query += f" AND price BETWEEN {price_range[0]} AND {price_range[1]}"
+query += f" AND star_rating BETWEEN {star_rating[0]} AND {star_rating[1]}"
+if busname:
+    query += f" AND busname IN ({format_for_sql_in(busname)})"
+query += f" AND departing_time BETWEEN '{departure_time_start}' AND '{departure_time_end}'"
+
+if availability == 'Available Only':
+    avg_price_query += " AND seats_available > 0"
+
+avg_price_query += " GROUP BY route_name"
+
+# Execute the query
+avg_price_per_busroute = pd.read_sql(avg_price_query, engine)
+
+# Display the result as a bar chart
+st.bar_chart(avg_price_per_busroute.set_index('route_name'))
+
+
+st.subheader("Bustype Vs Rating")
+#Data analysis=2
+avg_rating_query = "SELECT bustype, AVG(star_rating) AS avg_star_rating FROM redbus.busdata WHERE 1=1"
+
+# Add filters only if they are not empty
+if bustype:
+    query += f" AND bustype IN ({format_for_sql_in(bustype)})"
+if route:
+    query += f" AND route_name IN ({format_for_sql_in(route)})"
+query += f" AND price BETWEEN {price_range[0]} AND {price_range[1]}"
+query += f" AND star_rating BETWEEN {star_rating[0]} AND {star_rating[1]}"
+if busname:
+    query += f" AND busname IN ({format_for_sql_in(busname)})"
+query += f" AND departing_time BETWEEN '{departure_time_start}' AND '{departure_time_end}'"
+if availability == 'Available Only':
+    avg_rating_query += " AND seats_available > 0"
+
+avg_rating_query += " GROUP BY bustype"
+
+# Execute the query
+avg_rating_per_bustype = pd.read_sql(avg_rating_query, engine)
+
+# Display the result as a bar chart
+st.bar_chart(avg_rating_per_bustype.set_index('bustype'))
